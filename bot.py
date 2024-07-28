@@ -25,7 +25,8 @@ def start(update: Update, context: CallbackContext) -> None:
         [InlineKeyboardButton("Закріпити робітника за будовою", callback_data='assign_worker')],
         [InlineKeyboardButton("Архів будов", callback_data='archive_buildings')],
         [InlineKeyboardButton("Архів робітників", callback_data='archive_workers')],
-        [InlineKeyboardButton("Відслідкування годин", callback_data='track_hours')]
+        [InlineKeyboardButton("Відслідкування годин", callback_data='track_hours')],
+        [InlineKeyboardButton("Повернутись до меню", callback_data='start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text('Ласкаво просимо! Виберіть опцію:', reply_markup=reply_markup)
@@ -137,7 +138,9 @@ def button(update: Update, context: CallbackContext) -> None:
     query.answer()
     data = query.data
 
-    if data == 'add_building':
+    if data == 'start':
+        start(update, context)
+    elif data == 'add_building':
         add_building(update, context)
     elif data == 'add_worker':
         add_worker(update, context)
@@ -177,4 +180,4 @@ def button(update: Update, context: CallbackContext) -> None:
         worker_name = data.split('_')[2]
         workers.pop(worker_name, None)
         query.edit_message_text(text=f"Робітника '{worker_name}' видалено.")
-    elif data.startswith('track
+    elif data.startswith('assign_'):
