@@ -1,12 +1,11 @@
 import os
 import logging
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler, CallbackContext
 
 # Налаштування логування
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Отримання токену бота з оточення
@@ -17,7 +16,6 @@ buildings = {}
 workers = {}
 work_hours = {}
 
-# Стартова команда
 def start(update: Update, context: CallbackContext) -> None:
     keyboard = [
         [InlineKeyboardButton("Додати будову", callback_data='add_building')],
@@ -159,25 +157,24 @@ def button(update: Update, context: CallbackContext) -> None:
             [InlineKeyboardButton("Видалити будову", callback_data=f'delete_building_{building_name}')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(text=f"Виберіть дію для будови '{building_name}':", reply_markup=reply_markup)
-    elif data.startswith('edit_address_'):
-        building_name = data.split('_')[2]
-        context.user_data['action'] = 'edit_address'
-        context.user_data['current_building'] = building_name
-        query.edit_message_text(text=f"Введіть нову адресу для будови '{building_name}':")
-    elif data.startswith('delete_building_'):
-        building_name = data.split('_')[2]
-        buildings.pop(building_name, None)
-        query.edit_message_text(text=f"Будову '{building_name}' видалено.")
-    elif data.startswith('edit_worker_'):
-        worker_name = data.split('_')[2]
-        keyboard = [
-            [InlineKeyboardButton("Видалити робітника", callback_data=f'delete_worker_{worker_name}')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(text=f"Виберіть дію для робітника '{worker_name}':", reply_markup=reply_markup)
-    elif data.startswith('delete_worker_'):
-        worker_name = data.split('_')[2]
-        workers.pop(worker_name, None)
-        query.edit_message_text(text=f"Робітника '{worker_name}' видалено.")
+        query.edit_message_text(text=f"Будова '{building_name}':", reply_markup=reply_markup)
     elif data.startswith('assign_'):
+        parts = data.split('_')
+        building_name = parts[1]
+        worker_name = parts[2]
+        buildings[building_name]['workers'].append(worker_name)
+        workers[worker_name]['buildings'].append(building_name)
+        update.callback_query.message.reply_text(f"Робітника '{worker_name}' закріплено за будовою '{building_name}'.")
+        context.user_data['action'] = None
+        return_to_menu(update, context)
+    elif data.startswith('track_hours_'):
+        building_name = data.split('_')[2]
+        keyboard = [[InlineKeyboardButton(worker, callback_data=f'track_worker_hours_{building_name}_{worker}') for worker in buildings[building_name]['workers']]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(text=f"Виберіть робітника для відслідкування годин у будові '{building_name}':", reply_markup=reply_markup)
+    elif data.startswith('track_worker_hours_'):
+        parts = data.split('_')
+        building_name = parts[3]
+        worker_name = parts[4]
+        worker_hours = workers[worker_name]['work_hours'].get(building_name, {})
+        message = f"Години роботи для '{worker_name}' у будові '{building
