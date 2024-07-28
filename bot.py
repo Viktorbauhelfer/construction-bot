@@ -1,7 +1,7 @@
 import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 # Встановлення логування
 logging.basicConfig(
@@ -15,61 +15,61 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 # Ініціалізація функції start
-def start(update: Update, context: CallbackContext):
+async def start(update: Update, context):
     keyboard = [
         [InlineKeyboardButton("Додати будову", callback_data='add_building')],
         [InlineKeyboardButton("Редагувати будову", callback_data='edit_building')],
         [InlineKeyboardButton("Додати працівника", callback_data='add_worker')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text('Оберіть дію:', reply_markup=reply_markup)
+    await update.message.reply_text('Оберіть дію:', reply_markup=reply_markup)
 
 # Обробка натискання кнопок
-def button(update: Update, context: CallbackContext):
+async def button(update: Update, context):
     query = update.callback_query
-    query.answer()
+    await query.answer()
     if query.data == 'add_building':
-        query.edit_message_text(text="Введіть назву будови:")
+        await query.edit_message_text(text="Введіть назву будови:")
         context.user_data['action'] = 'add_building'
     elif query.data == 'edit_building':
         # Логіка редагування будови
-        query.edit_message_text(text="Функція редагування будови ще не реалізована.")
+        await query.edit_message_text(text="Функція редагування будови ще не реалізована.")
     elif query.data == 'add_worker':
-        query.edit_message_text(text="Введіть ім'я працівника:")
+        await query.edit_message_text(text="Введіть ім'я працівника:")
         context.user_data['action'] = 'add_worker'
 
 # Обробка текстових повідомлень
-def handle_message(update: Update, context: CallbackContext):
+async def handle_message(update: Update, context):
     action = context.user_data.get('action')
     if action == 'add_building':
         # Логіка додавання будови
         building_name = update.message.text
-        update.message.reply_text(f'Будову "{building_name}" додано.')
+        await update.message.reply_text(f'Будову "{building_name}" додано.')
         context.user_data['action'] = None
     elif action == 'add_worker':
         # Логіка додавання працівника
         worker_name = update.message.text
-        update.message.reply_text(f'Працівника "{worker_name}" додано.')
+        await update.message.reply_text(f'Працівника "{worker_name}" додано.')
         context.user_data['action'] = None
 
 # Запуск бота з використанням Webhook
-def main():
-    updater = Updater(token=TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
+async def main():
+    application = Application.builder().token(TOKEN).build()
 
-    dispatcher.add_handler(CommandHandler('start', start))
-    dispatcher.add_handler(CallbackQueryHandler(button))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(CallbackQueryHandler(button))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Встановлення Webhook
-    updater.start_webhook(
+    await application.bot.setWebhook(WEBHOOK_URL + TOKEN)
+
+    application.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 8443)),
-        url_path=TOKEN
+        url_path=TOKEN,
+        webhook_url=WEBHOOK_URL + TOKEN
     )
-    updater.bot.setWebhook(WEBHOOK_URL + TOKEN)
-
-    updater.idle()
 
 if __name__ == '__main__':
-    main()
+    import asyncio
+    asyncio.run(main())
