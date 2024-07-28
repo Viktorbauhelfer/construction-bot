@@ -5,7 +5,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 # Встановлення логування
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelень)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
@@ -63,6 +63,7 @@ async def main():
     # Встановлення Webhook
     await application.bot.setWebhook(WEBHOOK_URL + TOKEN)
 
+    # Запуск вебхука
     application.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 8443)),
