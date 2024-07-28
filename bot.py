@@ -1,148 +1,118 @@
-import os
-import sqlite3
-from datetime import datetime
-from telegram import Update
-from telegram.ext import Updater, CommandHandler, CallbackContext
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
+import datetime
 
-# Ініціалізація бази даних
-conn = sqlite3.connect('construction_bot.db', check_same_thread=False)
-cursor = conn.cursor()
+# Define states
+ADDRESS, DESCRIPTION, OWNER, WORKER_NICK, WORKER_ACTION = range(5)
 
-# Створення таблиць
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS workers (
-    id INTEGER PRIMARY KEY,
-    name TEXT
-)
-''')
+# In-memory storage for workers and work logs
+workers = {}
+work_logs = {}
 
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS sites (
-    id INTEGER PRIMARY KEY,
-    address TEXT,
-    description TEXT,
-    owner TEXT,
-    status TEXT
-)
-''')
+def start(update: Update, context: CallbackContext) -> int:
+    reply_keyboard = [['Додати будову', 'Додати робітника']]
+    update.message.reply_text(
+        'Привіт! Я бот для управління будовами. Оберіть дію:',
+        reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
+    )
+    return ADDRESS
 
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS assignments (
-    id INTEGER PRIMARY KEY,
-    worker_id INTEGER,
-    site_id INTEGER,
-    start_time TEXT,
-    end_time TEXT
-)
-''')
+def add_site(update: Update, context: CallbackContext) -> int:
+    update.message.reply_text(
+        'Введіть адресу будови:',
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return ADDRESS
 
-conn.commit()
+def address(update: Update, context: CallbackContext) -> int:
+    user_data = context.user_data
+    user_data['address'] = update.message.text
+    update.message.reply_text('Введіть опис будови:')
+    return DESCRIPTION
 
-# Функції для команд
-def start(update: Update, context: CallbackContext) -> None:
-    update.message.reply_text('Вітаю! Я будівельний бот. Використовуйте команди для взаємодії зі мною.\n\n'
-                              '/add_worker <імʼя> - Додати робітника\n'
-                              '/list_workers - Переглянути список робітників\n'
-                              '/add_site <адреса>, <опис>, <власник> - Додати будову\n'
-                              '/list_sites - Переглянути список будов\n'
-                              '/assign <worker_id> <site_id> - Призначити робітника на будову\n'
-                              '/checkin <worker_id> - Відмітити прихід\n'
-                              '/checkout <worker_id> - Відмітити вихід\n'
-                              '/report <site_id> - Звіт по будові\n'
-                              '/finish_site <site_id> - Закрити будову\n'
-                              '/resume_site <site_id> - Відновити будову\n')
+def description(update: Update, context: CallbackContext) -> int:
+    user_data = context.user_data
+    user_data['description'] = update.message.text
+    update.message.reply_text('Введіть ім\'я власника будови:')
+    return OWNER
 
-def add_worker(update: Update, context: CallbackContext) -> None:
-    name = ' '.join(context.args)
-    cursor.execute('INSERT INTO workers (name) VALUES (?)', (name,))
-    conn.commit()
-    update.message.reply_text(f'Робітник {name} доданий.')
+def owner(update: Update, context: CallbackContext) -> int:
+    user_data = context.user_data
+    user_data['owner'] = update.message.text
+    update.message.reply_text(
+        f"Адреса: {user_data['address']}\n"
+        f"Опис: {user_data['description']}\n"
+        f"Власник: {user_data['owner']}\n"
+        f"Будову додано успішно!"
+    )
+    return ConversationHandler.END
 
-def list_workers(update: Update, context: CallbackContext) -> None:
-    cursor.execute('SELECT * FROM workers')
-    workers = cursor.fetchall()
-    response = '\n'.join([f'{worker[0]}: {worker[1]}' for worker in workers])
-    update.message.reply_text(response)
+def add_worker(update: Update, context: CallbackContext) -> int:
+    update.message.reply_text('Введіть нік робітника в Telegram:')
+    return WORKER_NICK
 
-def add_site(update: Update, context: CallbackContext) -> None:
-    args = ' '.join(context.args).split(',')
-    if len(args) != 3:
-        update.message.reply_text('Невірний формат. Використовуйте: /add_site <адреса>, <опис>, <власник>')
-        return
-    address, description, owner = args
-    cursor.execute('INSERT INTO sites (address, description, owner, status) VALUES (?, ?, ?, ?)',
-                   (address.strip(), description.strip(), owner.strip(), 'active'))
-    conn.commit()
-    update.message.reply_text(f'Будова за адресою {address} додана.')
+def worker_nick(update: Update, context: CallbackContext) -> int:
+    worker_nick = update.message.text
+    workers[worker_nick] = {'status': 'active'}
+    update.message.reply_text(f"Робітника @{worker_nick} додано успішно!")
+    return ConversationHandler.END
 
-def list_sites(update: Update, context: CallbackContext) -> None:
-    cursor.execute('SELECT * FROM sites')
-    sites = cursor.fetchall()
-    response = '\n'.join([f'{site[0]}: {site[1]} ({site[3]})' for site in sites])
-    update.message.reply_text(response)
+def log_work(update: Update, context: CallbackContext) -> int:
+    user_nick = update.message.from_user.username
+    if user_nick not in workers:
+        update.message.reply_text('Ви не зареєстровані як робітник.')
+        return ConversationHandler.END
+    reply_keyboard = [['Прийшов', 'Пішов']]
+    update.message.reply_text(
+        'Оберіть дію:',
+        reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
+    )
+    return WORKER_ACTION
 
-def assign(update: Update, context: CallbackContext) -> None:
-    if len(context.args) != 2:
-        update.message.reply_text('Невірний формат. Використовуйте: /assign <worker_id> <site_id>')
-        return
-    worker_id, site_id = context.args
-    cursor.execute('INSERT INTO assignments (worker_id, site_id, start_time) VALUES (?, ?, ?)',
-                   (worker_id, site_id, datetime.now().isoformat()))
-    conn.commit()
-    update.message.reply_text(f'Робітник {worker_id} призначений на будову {site_id}.')
+def worker_action(update: Update, context: CallbackContext) -> int:
+    user_nick = update.message.from_user.username
+    action = update.message.text
+    current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    if user_nick not in work_logs:
+        work_logs[user_nick] = []
 
-def checkin(update: Update, context: CallbackContext) -> None:
-    worker_id = ' '.join(context.args)
-    cursor.execute('UPDATE assignments SET start_time = ? WHERE worker_id = ? AND end_time IS NULL',
-                   (datetime.now().isoformat(), worker_id))
-    conn.commit()
-    update.message.reply_text(f'Робітник {worker_id} відмітив прихід.')
+    if action == 'Прийшов':
+        work_logs[user_nick].append({'start': current_time, 'end': None})
+        update.message.reply_text(f'Час приходу зареєстровано: {current_time}')
+    elif action == 'Пішов':
+        if work_logs[user_nick] and work_logs[user_nick][-1]['end'] is None:
+            work_logs[user_nick][-1]['end'] = current_time
+            update.message.reply_text(f'Час відходу зареєстровано: {current_time}')
+        else:
+            update.message.reply_text('Спочатку зареєструйте час приходу.')
+    return ConversationHandler.END
 
-def checkout(update: Update, context: CallbackContext) -> None:
-    worker_id = ' '.join(context.args)
-    cursor.execute('UPDATE assignments SET end_time = ? WHERE worker_id = ? AND end_time IS NULL',
-                   (datetime.now().isoformat(), worker_id))
-    conn.commit()
-    update.message.reply_text(f'Робітник {worker_id} відмітив вихід.')
+def cancel(update: Update, context: CallbackContext) -> int:
+    update.message.reply_text('Операцію скасовано.', reply_markup=ReplyKeyboardRemove())
+    return ConversationHandler.END
 
-def report(update: Update, context: CallbackContext) -> None:
-    site_id = ' '.join(context.args)
-    cursor.execute('SELECT * FROM assignments WHERE site_id = ?', (site_id,))
-    assignments = cursor.fetchall()
-    response = f'Звіт по будові {site_id}:\n'
-    for assignment in assignments:
-        worker_id, start_time, end_time = assignment[1], assignment[3], assignment[4]
-        response += f'Робітник {worker_id}: Початок - {start_time}, Кінець - {end_time}\n'
-    update.message.reply_text(response)
+def main():
+    updater = Updater("YOUR_BOT_TOKEN", use_context=True)
 
-def finish_site(update: Update, context: CallbackContext) -> None:
-    site_id = ' '.join(context.args)
-    cursor.execute('UPDATE sites SET status = ? WHERE id = ?', ('finished', site_id))
-    conn.commit()
-    update.message.reply_text(f'Будову {site_id} закрито.')
+    dp = updater.dispatcher
 
-def resume_site(update: Update, context: CallbackContext) -> None:
-    site_id = ' '.join(context.args)
-    cursor.execute('UPDATE sites SET status = ? WHERE id = ?', ('active', site_id))
-    conn.commit()
-    update.message.reply_text(f'Будову {site_id} відновлено.')
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            ADDRESS: [MessageHandler(Filters.regex('^(Додати будову)$'), add_site),
+                      MessageHandler(Filters.regex('^(Додати робітника)$'), add_worker),
+                      MessageHandler(Filters.text & ~Filters.command, address)],
+            DESCRIPTION: [MessageHandler(Filters.text & ~Filters.command, description)],
+            OWNER: [MessageHandler(Filters.text & ~Filters.command, owner)],
+            WORKER_NICK: [MessageHandler(Filters.text & ~Filters.command, worker_nick)],
+            WORKER_ACTION: [MessageHandler(Filters.text & ~Filters.command, worker_action)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)]
+    )
 
-def main() -> None:
-    token = os.getenv('TELEGRAM_TOKEN')
-    updater = Updater(token)
-    dispatcher = updater.dispatcher
-
-    dispatcher.add_handler(CommandHandler('start', start))
-    dispatcher.add_handler(CommandHandler('add_worker', add_worker))
-    dispatcher.add_handler(CommandHandler('list_workers', list_workers))
-    dispatcher.add_handler(CommandHandler('add_site', add_site))
-    dispatcher.add_handler(CommandHandler('list_sites', list_sites))
-    dispatcher.add_handler(CommandHandler('assign', assign))
-    dispatcher.add_handler(CommandHandler('checkin', checkin))
-    dispatcher.add_handler(CommandHandler('checkout', checkout))
-    dispatcher.add_handler(CommandHandler('report', report))
-    dispatcher.add_handler(CommandHandler('finish_site', finish_site))
-    dispatcher.add_handler(CommandHandler('resume_site', resume_site))
+    dp.add_handler(conv_handler)
+    dp.add_handler(CommandHandler('log_work', log_work))
 
     updater.start_polling()
     updater.idle()
