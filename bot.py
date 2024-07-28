@@ -1,98 +1,169 @@
 import os
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler, CallbackContext
 
-# Встановлення логування
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelень)s - %(message)s',
-    level=logging.INFO
-)
+# Налаштування логування
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Отримання токену бота та URL для Webhook з змінних середовища
+# Отримання токену бота з оточення
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# Ініціалізація функції start
-async def start(update: Update, context):
+# Дані для збереження будівель та робітників
+buildings = {}
+workers = {}
+work_hours = {}
+
+# Стартова команда
+def start(update: Update, context: CallbackContext) -> None:
     keyboard = [
         [InlineKeyboardButton("Додати будову", callback_data='add_building')],
-        [InlineKeyboardButton("Редагувати будову", callback_data='edit_building')],
-        [InlineKeyboardButton("Додати працівника", callback_data='add_worker')],
-        [InlineKeyboardButton("Редагувати працівника", callback_data='edit_worker')],
-        [InlineKeyboardButton("Відслідковування годин", callback_data='track_hours')],
+        [InlineKeyboardButton("Додати робітника", callback_data='add_worker')],
+        [InlineKeyboardButton("Архів будов", callback_data='archive_buildings')],
+        [InlineKeyboardButton("Архів робітників", callback_data='archive_workers')],
+        [InlineKeyboardButton("Відслідкування годин", callback_data='track_hours')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text('Оберіть дію:', reply_markup=reply_markup)
+    update.message.reply_text('Ласкаво просимо! Виберіть опцію:', reply_markup=reply_markup)
 
-# Обробка натискання кнопок
-async def button(update: Update, context):
+# Додавання будови
+def add_building(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    await query.answer()
-    if query.data == 'add_building':
-        await query.edit_message_text(text="Введіть назву будови:")
-        context.user_data['action'] = 'add_building_name'
-    elif query.data == 'edit_building':
-        # Логіка редагування будови
-        await query.edit_message_text(text="Функція редагування будови ще не реалізована.")
-    elif query.data == 'add_worker':
-        await query.edit_message_text(text="Введіть ім'я працівника:")
-        context.user_data['action'] = 'add_worker_name'
-    elif query.data == 'edit_worker':
-        # Логіка редагування працівника
-        await query.edit_message_text(text="Функція редагування працівника ще не реалізована.")
-    elif query.data == 'track_hours':
-        # Логіка відслідковування годин
-        await query.edit_message_text(text="Функція відслідковування годин ще не реалізована.")
+    query.answer()
+    context.user_data['action'] = 'add_building'
+    query.edit_message_text(text="Введіть назву будови:")
+
+# Додавання робітника
+def add_worker(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    context.user_data['action'] = 'add_worker'
+    query.edit_message_text(text="Введіть ім'я робітника:")
 
 # Обробка текстових повідомлень
-async def handle_message(update: Update, context):
-    action = context.user_data.get('action')
-    if action == 'add_building_name':
-        context.user_data['building_name'] = update.message.text
-        await update.message.reply_text("Введіть адресу будови:")
-        context.user_data['action'] = 'add_building_address'
-    elif action == 'add_building_address':
-        building_name = context.user_data.get('building_name')
-        building_address = update.message.text
-        # Збереження будови в базу даних (потрібно реалізувати)
-        await update.message.reply_text(f'Будову "{building_name}" за адресою "{building_address}" додано.')
-        context.user_data['action'] = None
-    elif action == 'add_worker_name':
-        context.user_data['worker_name'] = update.message.text
-        await update.message.reply_text("Введіть номер телефону працівника або виберіть з контактів:", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("Вибрати з контактів", request_contact=True)]], one_time_keyboard=True))
-        context.user_data['action'] = 'add_worker_contact'
-    elif action == 'add_worker_contact':
-        worker_name = context.user_data.get('worker_name')
-        if update.message.contact:
-            worker_contact = update.message.contact.phone_number
-        else:
-            worker_contact = update.message.text
-        # Збереження працівника в базу даних (потрібно реалізувати)
-        await update.message.reply_text(f'Працівника "{worker_name}" з контактом "{worker_contact}" додано.')
+def handle_text(update: Update, context: CallbackContext) -> None:
+    user_action = context.user_data.get('action')
+    if user_action == 'add_building':
+        building_name = update.message.text
+        buildings[building_name] = {'address': None, 'workers': []}
+        context.user_data['current_building'] = building_name
+        update.message.reply_text(f"Будову '{building_name}' додано. Введіть адресу будови:")
+        context.user_data['action'] = 'add_address'
+    elif user_action == 'add_address':
+        address = update.message.text
+        current_building = context.user_data.get('current_building')
+        if current_building:
+            buildings[current_building]['address'] = address
+            update.message.reply_text(f"Адресу '{address}' додано до будови '{current_building}'.")
+            context.user_data['action'] = None
+            context.user_data['current_building'] = None
+    elif user_action == 'add_worker':
+        worker_name = update.message.text
+        workers[worker_name] = {'buildings': [], 'work_hours': {}}
+        update.message.reply_text(f"Робітника '{worker_name}' додано.")
         context.user_data['action'] = None
 
-# Запуск бота з використанням Webhook
-async def main():
-    application = Application.builder().token(TOKEN).build()
+# Архів будов
+def archive_buildings(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    if buildings:
+        keyboard = [[InlineKeyboardButton(name, callback_data=f'edit_building_{name}') for name in buildings.keys()]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(text="Виберіть будову для редагування або видалення:", reply_markup=reply_markup)
+    else:
+        query.edit_message_text(text="Архів будов порожній.")
 
-    application.add_handler(CommandHandler('start', start))
-    application.add_handler(CallbackQueryHandler(button))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    application.add_handler(MessageHandler(filters.CONTACT, handle_message))
+# Архів робітників
+def archive_workers(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    if workers:
+        keyboard = [[InlineKeyboardButton(name, callback_data=f'edit_worker_{name}') for name in workers.keys()]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(text="Виберіть робітника для редагування або видалення:", reply_markup=reply_markup)
+    else:
+        query.edit_message_text(text="Архів робітників порожній.")
 
-    # Встановлення Webhook
-    await application.bot.setWebhook(WEBHOOK_URL + TOKEN)
+# Відслідкування годин
+def track_hours(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    if workers:
+        keyboard = [[InlineKeyboardButton(name, callback_data=f'track_hours_{name}') for name in workers.keys()]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(text="Виберіть робітника для відслідкування годин:", reply_markup=reply_markup)
+    else:
+        query.edit_message_text(text="Немає робітників для відслідкування годин.")
 
-    # Запуск вебхука
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 8443)),
-        url_path=TOKEN,
-        webhook_url=WEBHOOK_URL + TOKEN
-    )
+# Обробка callback запитів
+def button(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    data = query.data
+
+    if data == 'add_building':
+        add_building(update, context)
+    elif data == 'add_worker':
+        add_worker(update, context)
+    elif data == 'archive_buildings':
+        archive_buildings(update, context)
+    elif data == 'archive_workers':
+        archive_workers(update, context)
+    elif data == 'track_hours':
+        track_hours(update, context)
+    elif data.startswith('edit_building_'):
+        building_name = data.split('_')[2]
+        keyboard = [
+            [InlineKeyboardButton("Редагувати адресу", callback_data=f'edit_address_{building_name}')],
+            [InlineKeyboardButton("Видалити будову", callback_data=f'delete_building_{building_name}')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(text=f"Виберіть дію для будови '{building_name}':", reply_markup=reply_markup)
+    elif data.startswith('edit_address_'):
+        building_name = data.split('_')[2]
+        context.user_data['action'] = 'edit_address'
+        context.user_data['current_building'] = building_name
+        query.edit_message_text(text=f"Введіть нову адресу для будови '{building_name}':")
+    elif data.startswith('delete_building_'):
+        building_name = data.split('_')[2]
+        buildings.pop(building_name, None)
+        query.edit_message_text(text=f"Будову '{building_name}' видалено.")
+    elif data.startswith('edit_worker_'):
+        worker_name = data.split('_')[2]
+        keyboard = [
+            [InlineKeyboardButton("Видалити робітника", callback_data=f'delete_worker_{worker_name}')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(text=f"Виберіть дію для робітника '{worker_name}':", reply_markup=reply_markup)
+    elif data.startswith('delete_worker_'):
+        worker_name = data.split('_')[2]
+        workers.pop(worker_name, None)
+        query.edit_message_text(text=f"Робітника '{worker_name}' видалено.")
+    elif data.startswith('track_hours_'):
+        worker_name = data.split('_')[2]
+        hours = workers.get(worker_name, {}).get('work_hours', {})
+        text = f"Години роботи для '{worker_name}':\n"
+        for building, hrs in hours.items():
+            text += f"- {building}: {hrs} год.\n"
+        query.edit_message_text(text=text if hours else f"Немає записів про години роботи для '{worker_name}'.")
+
+# Головна функція для запуску бота
+def main() -> None:
+    # Створення апдейтера та диспетчера
+    updater = Updater(token=TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
+
+    # Додавання хендлерів команд
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CallbackQueryHandler(button))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
+
+    # Запуск бота
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == '__main__':
-    import asyncio
-    asyncio.run(main())
+    main()
