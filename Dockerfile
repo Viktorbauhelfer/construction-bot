@@ -21,5 +21,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Виконання перевірки файлів
 RUN ls -la
 
-# Запуск бота
-CMD ["python", "bot.py"]
+# Запуск Flask додатку
+CMD ["python", "webhook.py"]
