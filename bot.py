@@ -1,95 +1,135 @@
 import os
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import CallbackQueryHandler, CommandHandler, Filters, MessageHandler, Updater
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, ConversationHandler
+from telegram.ext import CallbackContext
 from dotenv import load_dotenv
 
-# Завантаження токену з файлу .env
+# Завантаження токену з .env файлу
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 
-# Тимчасові сховища даних
-constructions = {}
-workers = {}
-construction_workers = {}
-worker_hours = {}
+# Стан для ConversationHandler
+CHOOSING, TYPING_NAME, TYPING_ADDRESS, TYPING_OWNER, ADDING_WORKER, WORKER_HOURS = range(6)
 
-# Обробник команди /start
-def start(update: Update, context):
+# Словник для зберігання даних
+construction_data = {}
+worker_data = {}
+
+def start(update: Update, context: CallbackContext) -> None:
     keyboard = [
         [InlineKeyboardButton("Додати будову", callback_data='add_construction')],
         [InlineKeyboardButton("Додати робітника", callback_data='add_worker')],
-        [InlineKeyboardButton("Закріпити робітника за будовою", callback_data='assign_worker')],
-        [InlineKeyboardButton("Відслідковувати години", callback_data='track_hours')],
+        [InlineKeyboardButton("Ввести робочі години", callback_data='add_hours')],
+        [InlineKeyboardButton("Повернутись в головне меню", callback_data='main_menu')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text('Привіт! Я бот для управління будовами. Оберіть дію:', reply_markup=reply_markup)
 
-# Обробник кнопок
-def button(update: Update, context):
+def button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
-    
+
     if query.data == 'add_construction':
         query.edit_message_text(text="Введіть назву будови:")
-        context.user_data['action'] = 'add_construction'
+        return TYPING_NAME
     elif query.data == 'add_worker':
-        query.edit_message_text(text="Введіть ім'я робітника:")
-        context.user_data['action'] = 'add_worker'
-    elif query.data == 'assign_worker':
-        query.edit_message_text(text="Введіть ім'я робітника та будову (через кому):")
-        context.user_data['action'] = 'assign_worker'
-    elif query.data == 'track_hours':
-        query.edit_message_text(text="Введіть будову для відслідковування годин:")
-        context.user_data['action'] = 'track_hours'
+        query.edit_message_text(text="Введіть Telegram username робітника:")
+        return ADDING_WORKER
+    elif query.data == 'add_hours':
+        query.edit_message_text(text="Введіть будову, на якій ви працюєте:")
+        return WORKER_HOURS
     elif query.data == 'main_menu':
         start(update, context)
+        return ConversationHandler.END
 
-# Обробник повідомлень
-def message_handler(update: Update, context):
-    action = context.user_data.get('action')
-    
-    if action == 'add_construction':
-        constructions[update.message.text] = []
-        update.message.reply_text(f"Будову '{update.message.text}' додано успішно!")
-    elif action == 'add_worker':
-        workers[update.message.text] = {'name': update.message.text, 'constructions': []}
-        update.message.reply_text(f"Робітника '{update.message.text}' додано успішно!")
-    elif action == 'assign_worker':
-        worker_name, construction_name = map(str.strip, update.message.text.split(','))
-        if worker_name in workers and construction_name in constructions:
-            constructions[construction_name].append(worker_name)
-            workers[worker_name]['constructions'].append(construction_name)
-            update.message.reply_text(f"Робітника '{worker_name}' закріплено за будовою '{construction_name}' успішно!")
-        else:
-            update.message.reply_text("Робітника або будову не знайдено.")
-    elif action == 'track_hours':
-        construction_name = update.message.text
-        if construction_name in constructions:
-            report = f"Години для будови '{construction_name}':\n"
-            for worker in constructions[construction_name]:
-                hours = worker_hours.get(worker, {}).get(construction_name, 0)
-                report += f"{worker}: {hours} годин\n"
-            update.message.reply_text(report)
-        else:
-            update.message.reply_text("Будову не знайдено.")
-    
-    # Повернення до головного меню
-    keyboard = [[InlineKeyboardButton("Повернутися до меню", callback_data='main_menu')]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text("Виберіть дію:", reply_markup=reply_markup)
+def construction_name(update: Update, context: CallbackContext) -> None:
+    user_data = context.user_data
+    user_data['construction_name'] = update.message.text
+    update.message.reply_text('Введіть адресу будови:')
+    return TYPING_ADDRESS
 
-# Основна функція
-def main():
-    if not TOKEN:
-        raise ValueError("No BOT_TOKEN provided")
+def construction_address(update: Update, context: CallbackContext) -> None:
+    user_data = context.user_data
+    user_data['construction_address'] = update.message.text
+    update.message.reply_text('Введіть ім\'я власника будови:')
+    return TYPING_OWNER
+
+def construction_owner(update: Update, context: CallbackContext) -> None:
+    user_data = context.user_data
+    user_data['construction_owner'] = update.message.text
+
+    construction_name = user_data['construction_name']
+    construction_address = user_data['construction_address']
+    construction_owner = user_data['construction_owner']
+
+    construction_data[construction_name] = {
+        'address': construction_address,
+        'owner': construction_owner
+    }
+
+    update.message.reply_text(f"Будову '{construction_name}' додано з адресою '{construction_address}' та власником '{construction_owner}'.")
+    start(update, context)
+    return ConversationHandler.END
+
+def add_worker(update: Update, context: CallbackContext) -> None:
+    username = update.message.text
+    worker_data[username] = {'constructions': []}
+    update.message.reply_text(f"Робітника '{username}' додано.")
+    start(update, context)
+    return ConversationHandler.END
+
+def worker_hours_construction(update: Update, context: CallbackContext) -> None:
+    username = update.message.from_user.username
+    construction_name = update.message.text
+
+    if construction_name in construction_data:
+        if username in worker_data:
+            worker_data[username]['current_construction'] = construction_name
+            update.message.reply_text(f"Введіть дату (у форматі YYYY-MM-DD) та години (з-до) роботи для '{construction_name}':")
+            return WORKER_HOURS
+        else:
+            update.message.reply_text("Ви не є зареєстрованим робітником.")
+            start(update, context)
+            return ConversationHandler.END
+    else:
+        update.message.reply_text("Будову не знайдено. Спробуйте ще раз.")
+        return WORKER_HOURS
+
+def worker_hours(update: Update, context: CallbackContext) -> None:
+    username = update.message.from_user.username
+    construction_name = worker_data[username]['current_construction']
+    hours = update.message.text
+
+    if 'hours' not in worker_data[username]:
+        worker_data[username]['hours'] = {}
     
+    if construction_name not in worker_data[username]['hours']:
+        worker_data[username]['hours'][construction_name] = []
+
+    worker_data[username]['hours'][construction_name].append(hours)
+    update.message.reply_text(f"Години роботи для '{construction_name}' додано.")
+    start(update, context)
+    return ConversationHandler.END
+
+def main() -> None:
     updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
-    
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CallbackQueryHandler(button))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, message_handler))
-    
+    dispatcher = updater.dispatcher
+
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            CHOOSING: [CallbackQueryHandler(button)],
+            TYPING_NAME: [MessageHandler(Filters.text & ~Filters.command, construction_name)],
+            TYPING_ADDRESS: [MessageHandler(Filters.text & ~Filters.command, construction_address)],
+            TYPING_OWNER: [MessageHandler(Filters.text & ~Filters.command, construction_owner)],
+            ADDING_WORKER: [MessageHandler(Filters.text & ~Filters.command, add_worker)],
+            WORKER_HOURS: [MessageHandler(Filters.text & ~Filters.command, worker_hours)],
+        },
+        fallbacks=[CommandHandler('start', start)],
+    )
+
+    dispatcher.add_handler(conv_handler)
+
     updater.start_polling()
     updater.idle()
 
